@@ -44,6 +44,26 @@ const buildHeader = (jwk) => ({typ: 'JWT', alg: 'RS256', kid: jwk.kid});
 
 const buildCookie = (sessionId) => `mock-auth=${sessionId}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=86400`;
 
+const splitScope = (scope) => (typeof scope === 'string' && scope.trim() ? scope.trim().split(/\s+/) : []);
+
+const isScopeSubset = (requestedScope, grantedScope) => {
+	const requestedItems = splitScope(requestedScope);
+	if (requestedItems.length === 0) {
+		return true;
+	}
+	const grantedItems = new Set(splitScope(grantedScope));
+	return requestedItems.every((item) => grantedItems.has(item));
+};
+
+const findSessionByToken = (sessions, token) => {
+	for (const session of sessions.values()) {
+		if (session.token === token) {
+			return session;
+		}
+	}
+	return null;
+};
+
 const sendToken = (req, res, session, jwk, signingKey, ttl, aud, scope, nonce) => {
 	const token = createToken();
 	const header = buildHeader(jwk);
@@ -52,6 +72,12 @@ const sendToken = (req, res, session, jwk, signingKey, ttl, aud, scope, nonce) =
 	const accessClaims = {...userClaims, ...userAccessClaims, ...baseClaims, scope};
 	const idClaims = {...userClaims, ...userIdClaims, ...baseClaims, nonce};
 	session.token = token;
+	if (aud !== undefined) {
+		session.aud = aud;
+	}
+	if (scope !== undefined) {
+		session.scope = scope;
+	}
 	return Promise.all([signJwt(header, accessClaims, signingKey), signJwt(header, idClaims, signingKey)])
 		.then(([access_token, id_token]) =>
 			res
@@ -250,18 +276,21 @@ const handleToken =
 				return sendToken(req, res, session, jwk, signingKey, ttl, undefined, scope);
 			}
 			case 'refresh_token': {
-				const {client_id: aud, refresh_token: refreshToken, scope} = req.body;
-				const sessionId = req.cookies['mock-auth'];
-				const session = sessions.get(sessionId);
-				if (!session) {
-					return res.status(401).json({error: 'login_required', error_description: 'Session not found'});
-				}
-				if (session.token !== refreshToken) {
-					session.token = null;
-					return res.status(401).json({error: 'login_required', error_description: 'Token not found'});
+				const {client_id: clientId, refresh_token: refreshToken, scope} = req.body;
+				if (!refreshToken) {
+					return res.status(401).json({error: 'invalid_request', error_description: 'Refresh token is required'});
 				}
 
-				return sendToken(req, res, session, jwk, signingKey, ttl, aud, scope);
+				const session = findSessionByToken(sessions, refreshToken);
+				if (!session) {
+					return res.status(401).json({error: 'invalid_grant', error_description: 'Refresh token not found'});
+				}
+
+				if (!isScopeSubset(scope, session.scope)) {
+					return res.status(401).json({error: 'invalid_scope', error_description: 'Scope escalation is not allowed'});
+				}
+
+				return sendToken(req, res, session, jwk, signingKey, ttl, clientId || session.aud, scope || session.scope);
 			}
 		}
 		return res.status(401).json({error: 'invalid_request', error_description: 'Unexpected grant type'});
