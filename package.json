@@ -1,6 +1,6 @@
 {
-  "name": "@bluecateng/mock-oidc-provider",
-  "version": "0.3.4",
+  "name": "@zugbahnhof/mock-oidc-provider",
+  "version": "0.4.0",
   "description": "Mock OpenID Connect server for testing",
   "license": "ISC",
   "scripts": {
@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@github.com:bluecatengineering/mock-oidc-provider.git"
+    "url": "git@github.com:ZugBahnHof/mock-oidc-provider.git"
   },
   "keywords": [
     "cli",
